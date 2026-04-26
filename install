@@ -1,0 +1,145 @@
+#!/bin/bash
+
+# Check arguments
+if [ "$#" -ne 3 ]; then
+    echo "Usage: ./install <openrc> <tag> <ssh_key>"
+    exit 1
+fi
+
+OPENRC=$1
+TAG=$2
+SSH_KEY=$3
+
+# Load OpenStack credentials
+source $OPENRC
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') Starting deployment of $TAG using $OPENRC for credentials."
+
+# ---- FLOATING IPs ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Checking for available floating IPs..."
+AVAILABLE_IPS=$(openstack floating ip list --status DOWN -f value -c "Floating IP Address")
+IP_COUNT=$(echo "$AVAILABLE_IPS" | grep -c '[0-9]' || true)
+
+if [ "$IP_COUNT" -ge 2 ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Found $IP_COUNT available IPs, reusing them."
+    BASTION_IP=$(echo "$AVAILABLE_IPS" | sed -n '1p')
+    PROXY_IP=$(echo "$AVAILABLE_IPS" | sed -n '2p')
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Not enough IPs, allocating new ones."
+    BASTION_IP=$(openstack floating ip create ext-net -f value -c floating_ip_address)
+    PROXY_IP=$(openstack floating ip create ext-net -f value -c floating_ip_address)
+fi
+echo "$(date '+%Y-%m-%d %H:%M:%S') Bastion IP: $BASTION_IP, Proxy IP: $PROXY_IP"
+
+# ---- SSH KEYPAIR ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Checking if ${TAG}_key exists..."
+if ! openstack keypair show ${TAG}_key &>/dev/null; then
+    openstack keypair create --public-key ${SSH_KEY}.pub ${TAG}_key
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Added ${TAG}_key."
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') ${TAG}_key already exists, skipping."
+fi
+
+# ---- NETWORK ----
+if ! openstack network show ${TAG}_network &>/dev/null; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Creating ${TAG}_network..."
+    openstack network create --tag $TAG ${TAG}_network
+    openstack subnet create --network ${TAG}_network \
+        --subnet-range 192.168.1.0/24 \
+        --tag $TAG ${TAG}_subnet
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Network and subnet created."
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') ${TAG}_network already exists, skipping."
+fi
+
+# ---- ROUTER ----
+if ! openstack router show ${TAG}_router &>/dev/null; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Creating ${TAG}_router..."
+    openstack router create --tag $TAG ${TAG}_router
+    openstack router set --external-gateway ext-net ${TAG}_router
+    openstack router add subnet ${TAG}_router ${TAG}_subnet
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Router created and connected."
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') ${TAG}_router already exists, skipping."
+fi
+
+# ---- SECURITY GROUP ----
+if ! openstack security group show ${TAG}_sg &>/dev/null; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Creating security group..."
+    openstack security group create --tag $TAG ${TAG}_sg
+    # Allow SSH
+    openstack security group rule create --proto tcp --dst-port 22 ${TAG}_sg
+    # Allow Flask service
+    openstack security group rule create --proto tcp --dst-port 5000 ${TAG}_sg
+    # Allow SNMP
+    openstack security group rule create --proto udp --dst-port 161 ${TAG}_sg
+    openstack security group rule create --proto udp --dst-port 6000 ${TAG}_sg
+    # Allow ICMP (ping)
+    openstack security group rule create --proto icmp ${TAG}_sg
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Security group created."
+fi
+
+# ---- IMAGE ----
+IMAGE=$(openstack image list --status active -f value -c Name | grep -i "Ubuntu 20.04" | head -1)
+echo "$(date '+%Y-%m-%d %H:%M:%S') Using image: $IMAGE"
+
+# ---- FLAVOR ----
+FLAVOR="m1.small"
+
+# ---- LAUNCH BASTION ----
+if ! openstack server show ${TAG}_bastion &>/dev/null; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Launching ${TAG}_bastion..."
+    openstack server create --image "$IMAGE" --flavor $FLAVOR \
+        --key-name ${TAG}_key \
+        --network ${TAG}_network \
+        --security-group ${TAG}_sg \
+        --tag $TAG \
+        ${TAG}_bastion
+fi
+
+# ---- LAUNCH PROXY ----
+if ! openstack server show ${TAG}_proxy &>/dev/null; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Launching ${TAG}_proxy..."
+    openstack server create --image "$IMAGE" --flavor $FLAVOR \
+        --key-name ${TAG}_key \
+        --network ${TAG}_network \
+        --security-group ${TAG}_sg \
+        --tag $TAG \
+        ${TAG}_proxy
+fi
+
+# ---- LAUNCH NODES ----
+NODE_COUNT=$(cat servers.conf)
+echo "$(date '+%Y-%m-%d %H:%M:%S') Will need $NODE_COUNT nodes (servers.conf), launching them."
+for i in $(seq 1 $NODE_COUNT); do
+    if ! openstack server show ${TAG}_node${i} &>/dev/null; then
+        openstack server create --image "$IMAGE" --flavor $FLAVOR \
+            --key-name ${TAG}_key \
+            --network ${TAG}_network \
+            --security-group ${TAG}_sg \
+            --tag $TAG \
+            ${TAG}_node${i}
+    fi
+done
+
+# ---- WAIT FOR NODES ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting for all nodes to become ACTIVE..."
+for SERVER in ${TAG}_bastion ${TAG}_proxy $(seq 1 $NODE_COUNT | xargs -I{} echo ${TAG}_node{}); do
+    while true; do
+        STATUS=$(openstack server show $SERVER -f value -c status)
+        if [ "$STATUS" = "ACTIVE" ]; then
+            echo -n "[$SERVER done]"
+            break
+        fi
+        sleep 5
+    done
+done
+echo ""
+echo "$(date '+%Y-%m-%d %H:%M:%S') All nodes are ACTIVE."
+
+# ---- ATTACH FLOATING IPs ----
+openstack server add floating ip ${TAG}_bastion $BASTION_IP
+openstack server add floating ip ${TAG}_proxy $PROXY_IP
+echo "$(date '+%Y-%m-%d %H:%M:%S') Floating IPs attached."
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') Done! Bastion: $BASTION_IP  Proxy: $PROXY_IP"
