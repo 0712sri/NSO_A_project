@@ -1,0 +1,18 @@
+global
+    daemon
+
+defaults
+    mode tcp
+    timeout connect 5000ms
+    timeout client 50000ms
+    timeout server 50000ms
+
+frontend service_front
+    bind *:5000
+    default_backend service_nodes
+
+backend service_nodes
+    balance roundrobin
+{% for host in groups['nodes'] %}
+    server {{ host }} {{ hostvars[host]['ansible_host'] }}:5000 check
+{% endfor %}
