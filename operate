@@ -1,0 +1,100 @@
+#!/bin/bash
+
+if [ "$#" -ne 3 ]; then
+    echo "Usage: ./operate <openrc> <tag> <ssh_key>"
+    exit 1
+fi
+
+OPENRC=$1
+TAG=$2
+SSH_KEY=$3
+
+source $OPENRC
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') Starting operations mode for $TAG"
+
+while true; do
+    # Read required node count from servers.conf
+    REQUIRED=$(cat servers.conf)
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Reading servers.conf, we need $REQUIRED nodes."
+
+    # Get list of running nodes
+    CURRENT_NODES=$(openstack server list --tag $TAG -f value -c Name | grep "${TAG}_node")
+    CURRENT_COUNT=$(echo "$CURRENT_NODES" | grep -c '[a-z]' || true)
+
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Checking solution, we have: $CURRENT_COUNT nodes."
+
+    if [ "$CURRENT_COUNT" -lt "$REQUIRED" ]; then
+        # Need more nodes
+        NEEDED=$((REQUIRED - CURRENT_COUNT))
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Need $NEEDED more nodes, launching them..."
+
+        # Find next available node number
+        NEXT=$(openstack server list --tag $TAG -f value -c Name | grep "${TAG}_node" | grep -oP '\d+' | sort -n | tail -1)
+        NEXT=$((NEXT + 1))
+
+        IMAGE=$(openstack image list --status active -f value -c Name | grep -i "Ubuntu 20.04" | head -1)
+        FLAVOR="m1.small"
+
+        for i in $(seq $NEXT $((NEXT + NEEDED - 1))); do
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Launching ${TAG}_node${i}..."
+            openstack server create --image "$IMAGE" --flavor $FLAVOR \
+                --key-name ${TAG}_key \
+                --network ${TAG}_network \
+                --security-group ${TAG}_sg \
+                --tag $TAG \
+                ${TAG}_node${i}
+        done
+
+        # Wait for new nodes to be active
+        for i in $(seq $NEXT $((NEXT + NEEDED - 1))); do
+            while true; do
+                STATUS=$(openstack server show ${TAG}_node${i} -f value -c status)
+                if [ "$STATUS" = "ACTIVE" ]; then
+                    echo "$(date '+%Y-%m-%d %H:%M:%S') ${TAG}_node${i} is ACTIVE"
+                    break
+                fi
+                sleep 5
+            done
+        done
+
+        # Regenerate hosts.cfg
+        BASTION_IP=$(openstack server show ${TAG}_bastion -f value -c addresses | grep -oP '[\d.]+' | tail -1)
+        PROXY_IP=$(openstack server show ${TAG}_proxy -f value -c addresses | grep -oP '[\d.]+' | tail -1)
+
+        cat > ansible/hosts.cfg << HOSTS
+[bastion]
+bastion ansible_host=$BASTION_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY
+
+[proxy]
+proxy ansible_host=$PROXY_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY
+
+[nodes]
+HOSTS
+
+        ALL_NODES=$(openstack server list --tag $TAG -f value -c Name | grep "${TAG}_node")
+        for NODE in $ALL_NODES; do
+            NODE_IP=$(openstack server show $NODE -f value -c addresses | grep -oP '[\d.]+' | head -1)
+            echo "$NODE ansible_host=$NODE_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyJump=ubuntu@$BASTION_IP'" >> ansible/hosts.cfg
+        done
+
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Running Ansible playbook..."
+        ansible-playbook -i ansible/hosts.cfg ansible/site.yml
+
+    elif [ "$CURRENT_COUNT" -gt "$REQUIRED" ]; then
+        # Too many nodes, remove surplus
+        EXCESS=$((CURRENT_COUNT - REQUIRED))
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Too many nodes, removing $EXCESS node(s)..."
+
+        NODES_TO_REMOVE=$(echo "$CURRENT_NODES" | tail -$EXCESS)
+        for NODE in $NODES_TO_REMOVE; do
+            echo "$(date '+%Y-%m-%d %H:%M:%S') Removing $NODE..."
+            openstack server delete $NODE
+        done
+
+    else
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Node count is correct. Sleeping for 30s..."
+    fi
+
+    sleep 30
+done
