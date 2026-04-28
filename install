@@ -43,10 +43,10 @@ fi
 # ---- NETWORK ----
 if ! openstack network show ${TAG}_network &>/dev/null; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') Creating ${TAG}_network..."
-    openstack network create --tag $TAG ${TAG}_network
+    openstack network create ${TAG}_network
     openstack subnet create --network ${TAG}_network \
         --subnet-range 192.168.1.0/24 \
-        --tag $TAG ${TAG}_subnet
+        ${TAG}_subnet
     echo "$(date '+%Y-%m-%d %H:%M:%S') Network and subnet created."
 else
     echo "$(date '+%Y-%m-%d %H:%M:%S') ${TAG}_network already exists, skipping."
@@ -55,7 +55,7 @@ fi
 # ---- ROUTER ----
 if ! openstack router show ${TAG}_router &>/dev/null; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') Creating ${TAG}_router..."
-    openstack router create --tag $TAG ${TAG}_router
+    openstack router create ${TAG}_router
     openstack router set --external-gateway ext-net ${TAG}_router
     openstack router add subnet ${TAG}_router ${TAG}_subnet
     echo "$(date '+%Y-%m-%d %H:%M:%S') Router created and connected."
@@ -66,7 +66,7 @@ fi
 # ---- SECURITY GROUP ----
 if ! openstack security group show ${TAG}_sg &>/dev/null; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') Creating security group..."
-    openstack security group create --tag $TAG ${TAG}_sg
+    openstack security group create ${TAG}_sg
     # Allow SSH
     openstack security group rule create --proto tcp --dst-port 22 ${TAG}_sg
     # Allow Flask service
@@ -93,7 +93,7 @@ if ! openstack server show ${TAG}_bastion &>/dev/null; then
         --key-name ${TAG}_key \
         --network ${TAG}_network \
         --security-group ${TAG}_sg \
-        --tag $TAG \
+        \
         ${TAG}_bastion
 fi
 
@@ -104,7 +104,7 @@ if ! openstack server show ${TAG}_proxy &>/dev/null; then
         --key-name ${TAG}_key \
         --network ${TAG}_network \
         --security-group ${TAG}_sg \
-        --tag $TAG \
+        \
         ${TAG}_proxy
 fi
 
@@ -117,7 +117,7 @@ for i in $(seq 1 $NODE_COUNT); do
             --key-name ${TAG}_key \
             --network ${TAG}_network \
             --security-group ${TAG}_sg \
-            --tag $TAG \
+            \
             ${TAG}_node${i}
     fi
 done

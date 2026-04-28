@@ -19,7 +19,7 @@ while true; do
     echo "$(date '+%Y-%m-%d %H:%M:%S') Reading servers.conf, we need $REQUIRED nodes."
 
     # Get list of running nodes
-    CURRENT_NODES=$(openstack server list --tag $TAG -f value -c Name | grep "${TAG}_node")
+    CURRENT_NODES=$(openstack server list -f value -c Name | grep "${TAG}_node")
     CURRENT_COUNT=$(echo "$CURRENT_NODES" | grep -c '[a-z]' || true)
 
     echo "$(date '+%Y-%m-%d %H:%M:%S') Checking solution, we have: $CURRENT_COUNT nodes."
@@ -30,7 +30,7 @@ while true; do
         echo "$(date '+%Y-%m-%d %H:%M:%S') Need $NEEDED more nodes, launching them..."
 
         # Find next available node number
-        NEXT=$(openstack server list --tag $TAG -f value -c Name | grep "${TAG}_node" | grep -oP '\d+' | sort -n | tail -1)
+        NEXT=$(openstack server list -f value -c Name | grep "${TAG}_node" | grep -oP '\d+' | sort -n | tail -1)
         NEXT=$((NEXT + 1))
 
         IMAGE=$(openstack image list --status active -f value -c Name | grep -i "Ubuntu 20.04" | head -1)
@@ -42,7 +42,7 @@ while true; do
                 --key-name ${TAG}_key \
                 --network ${TAG}_network \
                 --security-group ${TAG}_sg \
-                --tag $TAG \
+                \
                 ${TAG}_node${i}
         done
 
@@ -72,7 +72,7 @@ proxy ansible_host=$PROXY_IP ansible_user=ubuntu ansible_ssh_private_key_file=$S
 [nodes]
 HOSTS
 
-        ALL_NODES=$(openstack server list --tag $TAG -f value -c Name | grep "${TAG}_node")
+        ALL_NODES=$(openstack server list -f value -c Name | grep "${TAG}_node")
         for NODE in $ALL_NODES; do
             NODE_IP=$(openstack server show $NODE -f value -c addresses | grep -oP '[\d.]+' | head -1)
             echo "$NODE ansible_host=$NODE_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyJump=ubuntu@$BASTION_IP'" >> ansible/hosts.cfg

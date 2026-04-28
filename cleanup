@@ -14,7 +14,7 @@ source $OPENRC
 echo "$(date '+%Y-%m-%d %H:%M:%S') Cleaning up $TAG using $OPENRC"
 
 # ---- DELETE ALL SERVERS ----
-SERVERS=$(openstack server list --tag $TAG -f value -c Name)
+SERVERS=$(openstack server list -f value -c Name)
 for SERVER in $SERVERS; do
     echo "$(date '+%Y-%m-%d %H:%M:%S') Deleting server $SERVER..."
     openstack server delete $SERVER
@@ -23,7 +23,7 @@ done
 # Wait for servers to disappear
 echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting for servers to disappear..."
 while true; do
-    COUNT=$(openstack server list --tag $TAG -f value -c Name | grep -c '[a-z]' || true)
+    COUNT=$(openstack server list -f value -c Name | grep -c '[a-z]' || true)
     if [ "$COUNT" -eq 0 ]; then
         break
     fi
