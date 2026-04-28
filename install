@@ -26,8 +26,8 @@ if [ "$IP_COUNT" -ge 2 ]; then
     PROXY_IP=$(echo "$AVAILABLE_IPS" | sed -n '2p')
 else
     echo "$(date '+%Y-%m-%d %H:%M:%S') Not enough IPs, allocating new ones."
-    BASTION_IP=$(openstack floating ip create ext-net -f value -c floating_ip_address)
-    PROXY_IP=$(openstack floating ip create ext-net -f value -c floating_ip_address)
+    BASTION_IP=$(openstack floating ip create External -f value -c floating_ip_address)
+    PROXY_IP=$(openstack floating ip create External -f value -c floating_ip_address)
 fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') Bastion IP: $BASTION_IP, Proxy IP: $PROXY_IP"
 
@@ -56,7 +56,7 @@ fi
 if ! openstack router show ${TAG}_router &>/dev/null; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') Creating ${TAG}_router..."
     openstack router create ${TAG}_router
-    openstack router set --external-gateway ext-net ${TAG}_router
+    openstack router set --external-gateway External ${TAG}_router
     openstack router add subnet ${TAG}_router ${TAG}_subnet
     echo "$(date '+%Y-%m-%d %H:%M:%S') Router created and connected."
 else
@@ -84,7 +84,7 @@ IMAGE=$(openstack image list --status active -f value -c Name | grep -i "Ubuntu 
 echo "$(date '+%Y-%m-%d %H:%M:%S') Using image: $IMAGE"
 
 # ---- FLAVOR ----
-FLAVOR="m1.small"
+FLAVOR="small"
 
 # ---- LAUNCH BASTION ----
 if ! openstack server show ${TAG}_bastion &>/dev/null; then

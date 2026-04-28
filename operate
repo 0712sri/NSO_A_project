@@ -34,7 +34,7 @@ while true; do
         NEXT=$((NEXT + 1))
 
         IMAGE=$(openstack image list --status active -f value -c Name | grep -i "Ubuntu 20.04" | head -1)
-        FLAVOR="m1.small"
+        FLAVOR="small"
 
         for i in $(seq $NEXT $((NEXT + NEEDED - 1))); do
             echo "$(date '+%Y-%m-%d %H:%M:%S') Launching ${TAG}_node${i}..."
