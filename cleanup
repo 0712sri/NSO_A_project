@@ -1,0 +1,62 @@
+#!/bin/bash
+
+if [ "$#" -ne 3 ]; then
+    echo "Usage: ./cleanup <openrc> <tag> <ssh_key>"
+    exit 1
+fi
+
+OPENRC=$1
+TAG=$2
+SSH_KEY=$3
+
+source $OPENRC
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') Cleaning up $TAG using $OPENRC"
+
+# ---- DELETE ALL SERVERS ----
+SERVERS=$(openstack server list --tag $TAG -f value -c Name)
+for SERVER in $SERVERS; do
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Deleting server $SERVER..."
+    openstack server delete $SERVER
+done
+
+# Wait for servers to disappear
+echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting for servers to disappear..."
+while true; do
+    COUNT=$(openstack server list --tag $TAG -f value -c Name | grep -c '[a-z]' || true)
+    if [ "$COUNT" -eq 0 ]; then
+        break
+    fi
+    echo -n "."
+    sleep 5
+done
+echo ""
+echo "$(date '+%Y-%m-%d %H:%M:%S') Servers are gone."
+
+# ---- RELEASE FLOATING IPs ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Releasing floating IPs..."
+FLOATING_IPS=$(openstack floating ip list --status DOWN -f value -c ID)
+for IP in $FLOATING_IPS; do
+    openstack floating ip delete $IP
+done
+
+# ---- REMOVE SECURITY GROUP ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Removing security group..."
+openstack security group delete ${TAG}_sg 2>/dev/null || true
+
+# ---- REMOVE ROUTER ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Removing router..."
+openstack router remove subnet ${TAG}_router ${TAG}_subnet 2>/dev/null || true
+openstack router unset --external-gateway ${TAG}_router 2>/dev/null || true
+openstack router delete ${TAG}_router 2>/dev/null || true
+
+# ---- REMOVE SUBNET AND NETWORK ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Removing subnet and network..."
+openstack subnet delete ${TAG}_subnet 2>/dev/null || true
+openstack network delete ${TAG}_network 2>/dev/null || true
+
+# ---- REMOVE KEYPAIR ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Removing keypair..."
+openstack keypair delete ${TAG}_key 2>/dev/null || true
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') Cleanup done!"
