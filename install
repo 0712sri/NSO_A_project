@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# Check arguments
 if [ "$#" -ne 3 ]; then
     echo "Usage: ./install <openrc> <tag> <ssh_key>"
     exit 1
@@ -10,7 +9,6 @@ OPENRC=$1
 TAG=$2
 SSH_KEY=$3
 
-# Load OpenStack credentials
 source $OPENRC
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') Starting deployment of $TAG using $OPENRC for credentials."
@@ -45,8 +43,7 @@ if ! openstack network show ${TAG}_network &>/dev/null; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') Creating ${TAG}_network..."
     openstack network create ${TAG}_network
     openstack subnet create --network ${TAG}_network \
-        --subnet-range 192.168.1.0/24 \
-        ${TAG}_subnet
+        --subnet-range 192.168.1.0/24 ${TAG}_subnet
     echo "$(date '+%Y-%m-%d %H:%M:%S') Network and subnet created."
 else
     echo "$(date '+%Y-%m-%d %H:%M:%S') ${TAG}_network already exists, skipping."
@@ -67,24 +64,18 @@ fi
 if ! openstack security group show ${TAG}_sg &>/dev/null; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') Creating security group..."
     openstack security group create ${TAG}_sg
-    # Allow SSH
     openstack security group rule create --proto tcp --dst-port 22 ${TAG}_sg
-    # Allow Flask service
     openstack security group rule create --proto tcp --dst-port 5000 ${TAG}_sg
-    # Allow SNMP
     openstack security group rule create --proto udp --dst-port 161 ${TAG}_sg
     openstack security group rule create --proto udp --dst-port 6000 ${TAG}_sg
-    # Allow ICMP (ping)
     openstack security group rule create --proto icmp ${TAG}_sg
     echo "$(date '+%Y-%m-%d %H:%M:%S') Security group created."
 fi
 
-# ---- IMAGE ----
+# ---- IMAGE & FLAVOR ----
 IMAGE=$(openstack image list --status active -f value -c Name | grep -i "Ubuntu 20.04" | head -1)
-echo "$(date '+%Y-%m-%d %H:%M:%S') Using image: $IMAGE"
-
-# ---- FLAVOR ----
 FLAVOR="small"
+echo "$(date '+%Y-%m-%d %H:%M:%S') Using image: $IMAGE"
 
 # ---- LAUNCH BASTION ----
 if ! openstack server show ${TAG}_bastion &>/dev/null; then
@@ -93,7 +84,6 @@ if ! openstack server show ${TAG}_bastion &>/dev/null; then
         --key-name ${TAG}_key \
         --network ${TAG}_network \
         --security-group ${TAG}_sg \
-        \
         ${TAG}_bastion
 fi
 
@@ -104,7 +94,6 @@ if ! openstack server show ${TAG}_proxy &>/dev/null; then
         --key-name ${TAG}_key \
         --network ${TAG}_network \
         --security-group ${TAG}_sg \
-        \
         ${TAG}_proxy
 fi
 
@@ -117,16 +106,15 @@ for i in $(seq 1 $NODE_COUNT); do
             --key-name ${TAG}_key \
             --network ${TAG}_network \
             --security-group ${TAG}_sg \
-            \
             ${TAG}_node${i}
     fi
 done
 
-# ---- WAIT FOR NODES ----
+# ---- WAIT FOR ACTIVE ----
 echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting for all nodes to become ACTIVE..."
 for SERVER in ${TAG}_bastion ${TAG}_proxy $(seq 1 $NODE_COUNT | xargs -I{} echo ${TAG}_node{}); do
     while true; do
-        STATUS=$(openstack server show $SERVER -f value -c status)
+        STATUS=$(openstack server show $SERVER -f value -c status 2>/dev/null)
         if [ "$STATUS" = "ACTIVE" ]; then
             echo -n "[$SERVER done]"
             break
@@ -141,5 +129,32 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') All nodes are ACTIVE."
 openstack server add floating ip ${TAG}_bastion $BASTION_IP
 openstack server add floating ip ${TAG}_proxy $PROXY_IP
 echo "$(date '+%Y-%m-%d %H:%M:%S') Floating IPs attached."
+
+# ---- GENERATE HOSTS.CFG ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Generating Ansible hosts file..."
+cat > ansible/hosts.cfg << HOSTS
+[bastion]
+bastion ansible_host=$BASTION_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+
+[proxy]
+proxy ansible_host=$PROXY_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyJump=ubuntu@$BASTION_IP'
+
+[nodes]
+HOSTS
+
+for i in $(seq 1 $NODE_COUNT); do
+    NODE_IP=$(openstack server show ${TAG}_node${i} -f value -c addresses | grep -oP '[\d.]+' | head -1)
+    echo "node${i} ansible_host=$NODE_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyJump=ubuntu@$BASTION_IP'" >> ansible/hosts.cfg
+done
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') hosts.cfg generated:"
+cat ansible/hosts.cfg
+
+# ---- RUN ANSIBLE ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting for SSH to be ready..."
+sleep 30
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') Running Ansible playbook..."
+ansible-playbook -i ansible/hosts.cfg ansible/site.yml
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') Done! Bastion: $BASTION_IP  Proxy: $PROXY_IP"
