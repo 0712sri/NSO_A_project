@@ -1,66 +1,91 @@
-cd ~/NSO_A_project
-cat > ansible/site.yml << 'EOF'
----
-- name: Configure nodes
+- name: Setup all nodes
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install base packages
+      apt:
+        name:
+          - curl
+          - vim
+          - git
+          - python3-pip
+        state: present
+        update_cache: yes
+
+- name: Setup web servers on nodes
   hosts: nodes
   become: yes
   tasks:
-    - name: Update apt cache
+    - name: Install Apache
       apt:
-        update_cache: yes
-
-    - name: Install python3 and flask
-      apt:
-        name:
-          - python3
-          - python3-pip
+        name: apache2
         state: present
 
-    - name: Install flask
-      pip:
-        name: flask
-
-    - name: Install SNMP daemon
-      apt:
-        name: snmpd
-        state: present
-
-    - name: Copy service.py to nodes
-      copy:
-        src: ../service.py
-        dest: /home/ubuntu/service.py
-        owner: ubuntu
-        mode: '0755'
-
-    - name: Start SNMP daemon
+    - name: Start Apache
       service:
-        name: snmpd
+        name: apache2
         state: started
         enabled: yes
 
-    - name: Run service.py in background
-      shell: nohup python3 /home/ubuntu/service.py &
-      async: 10
-      poll: 0
+- name: Configure node1 page
+  hosts: node1
+  become: yes
+  tasks:
+    - name: Add node1 page
+      copy:
+        content: "Hello from NODE 1"
+        dest: /var/www/html/index.html
 
-- name: Configure proxy
-  hosts: proxy
+- name: Configure node2 page
+  hosts: node2
+  become: yes
+  tasks:
+    - name: Add node2 page
+      copy:
+        content: "Hello from NODE 2"
+        dest: /var/www/html/index.html
+
+- name: Setup HAProxy
+  hosts: proxy_host
   become: yes
   tasks:
     - name: Install HAProxy
       apt:
         name: haproxy
         state: present
-        update_cache: yes
 
-    - name: Copy HAProxy config
-      template:
-        src: haproxy.cfg.j2
+    - name: Configure HAProxy
+      copy:
         dest: /etc/haproxy/haproxy.cfg
+        content: |
+          global
+              daemon
+              maxconn 256
+
+          defaults
+              mode http
+              timeout connect 5s
+              timeout client  50s
+              timeout server  50s
+
+          frontend http_front
+              bind *:80
+              default_backend http_back
+
+          backend http_back
+              balance roundrobin
+              server node1 192.168.1.53:80 check
+              server node2 192.168.1.122:80 check
+
+          listen stats
+              bind *:8404
+              mode http
+              stats enable
+              stats uri /stats
+              stats refresh 5s
+              stats auth admin:admin
 
     - name: Restart HAProxy
       service:
         name: haproxy
         state: restarted
-        enabled: yes
-EOF
