@@ -1,0 +1,66 @@
+cd ~/NSO_A_project
+cat > ansible/site.yml << 'EOF'
+---
+- name: Configure nodes
+  hosts: nodes
+  become: yes
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install python3 and flask
+      apt:
+        name:
+          - python3
+          - python3-pip
+        state: present
+
+    - name: Install flask
+      pip:
+        name: flask
+
+    - name: Install SNMP daemon
+      apt:
+        name: snmpd
+        state: present
+
+    - name: Copy service.py to nodes
+      copy:
+        src: ../service.py
+        dest: /home/ubuntu/service.py
+        owner: ubuntu
+        mode: '0755'
+
+    - name: Start SNMP daemon
+      service:
+        name: snmpd
+        state: started
+        enabled: yes
+
+    - name: Run service.py in background
+      shell: nohup python3 /home/ubuntu/service.py &
+      async: 10
+      poll: 0
+
+- name: Configure proxy
+  hosts: proxy
+  become: yes
+  tasks:
+    - name: Install HAProxy
+      apt:
+        name: haproxy
+        state: present
+        update_cache: yes
+
+    - name: Copy HAProxy config
+      template:
+        src: haproxy.cfg.j2
+        dest: /etc/haproxy/haproxy.cfg
+
+    - name: Restart HAProxy
+      service:
+        name: haproxy
+        state: restarted
+        enabled: yes
+EOF
