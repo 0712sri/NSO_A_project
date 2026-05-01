@@ -11,7 +11,10 @@ SSH_KEY=$3
 
 source $OPENRC
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') Starting deployment of $TAG"
+echo "Starting deployment: $TAG"
+
+# ---- NODE COUNT ----
+NODE_COUNT=$(cat servers.conf)
 
 # ---- FLOATING IPs ----
 AVAILABLE_IPS=$(openstack floating ip list --status DOWN -f value -c "Floating IP Address")
@@ -42,41 +45,46 @@ fi
 # ---- ROUTER ----
 if ! openstack router show ${TAG}_router &>/dev/null; then
     openstack router create ${TAG}_router
-    openstack router set --external-gateway External ${TAG}_router
-    openstack router add subnet ${TAG}_router ${TAG}_subnet
 fi
+
+openstack router set --external-gateway External ${TAG}_router
+openstack router add subnet ${TAG}_router ${TAG}_subnet 2>/dev/null
 
 # ---- SECURITY GROUP ----
 if ! openstack security group show ${TAG}_sg &>/dev/null; then
     openstack security group create ${TAG}_sg
-    openstack security group rule create --proto tcp --dst-port 22 ${TAG}_sg
-    openstack security group rule create --proto tcp --dst-port 5000 ${TAG}_sg
-    openstack security group rule create --proto udp --dst-port 6000 ${TAG}_sg
-    openstack security group rule create --proto icmp ${TAG}_sg
 fi
 
+openstack security group rule create --proto tcp --dst-port 22 ${TAG}_sg 2>/dev/null
+openstack security group rule create --proto tcp --dst-port 5000 ${TAG}_sg 2>/dev/null
+openstack security group rule create --proto udp --dst-port 6000 ${TAG}_sg 2>/dev/null
+openstack security group rule create --proto icmp ${TAG}_sg 2>/dev/null
+
 # ---- IMAGE & FLAVOR ----
-IMAGE=$(openstack image list -f value -c Name | grep -i ubuntu | head -1)
-FLAVOR=$(openstack flavor list -f value -c Name | head -1)
+IMAGE=$(openstack image list -f value -c Name | grep -i "Ubuntu 20.04" | head -1)
+FLAVOR="small"
 
 # ---- CREATE SERVERS ----
-openstack server create --image "$IMAGE" --flavor $FLAVOR \
-    --key-name ${TAG}_key --network ${TAG}_network --security-group ${TAG}_sg \
-    ${TAG}_bastion
+create_server() {
+    NAME=$1
+    if ! openstack server show $NAME &>/dev/null; then
+        openstack server create --image "$IMAGE" --flavor $FLAVOR \
+            --key-name ${TAG}_key \
+            --network ${TAG}_network \
+            --security-group ${TAG}_sg \
+            $NAME
+    fi
+}
 
-openstack server create --image "$IMAGE" --flavor $FLAVOR \
-    --key-name ${TAG}_key --network ${TAG}_network --security-group ${TAG}_sg \
-    ${TAG}_proxy
-
-NODE_COUNT=$(cat servers.conf)
+create_server ${TAG}_bastion
+create_server ${TAG}_proxy
 
 for i in $(seq 1 $NODE_COUNT); do
-    openstack server create --image "$IMAGE" --flavor $FLAVOR \
-        --key-name ${TAG}_key --network ${TAG}_network --security-group ${TAG}_sg \
-        ${TAG}_node${i}
+    create_server ${TAG}_node${i}
 done
 
-# ---- WAIT ----
+# ---- WAIT FOR ACTIVE ----
+echo "Waiting for servers..."
 sleep 30
 
 # ---- ATTACH FLOATING IP ----
@@ -86,22 +94,32 @@ openstack server add floating ip ${TAG}_proxy $PROXY_IP
 # ---- GENERATE HOSTS FILE ----
 mkdir -p ansible
 
-cat > ansible/hosts.cfg <<EOF
+cat > ansible/hosts.cfg << HOSTS
 [bastion]
-bastion ansible_host=$BASTION_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY
+bastion_host ansible_host=$BASTION_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY ansible_ssh_common_args='-o StrictHostKeyChecking=no'
 
 [proxy]
-proxy ansible_host=$PROXY_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY
+proxy_host ansible_host=$PROXY_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY ansible_ssh_common_args='-o StrictHostKeyChecking=no'
 
 [nodes]
-EOF
+HOSTS
 
 for i in $(seq 1 $NODE_COUNT); do
     NODE_IP=$(openstack server show ${TAG}_node${i} -f value -c addresses | grep -oP '[\d.]+' | head -1)
-    echo "node${i} ansible_host=$NODE_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY" >> ansible/hosts.cfg
+    if [ -n "$NODE_IP" ]; then
+        echo "node${i} ansible_host=$NODE_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyJump=ubuntu@$BASTION_IP'" >> ansible/hosts.cfg
+    fi
 done
 
-echo "hosts.cfg created:"
+echo "Generated hosts.cfg:"
 cat ansible/hosts.cfg
 
-echo "Done!"
+# ---- WAIT FOR SSH ----
+echo "Waiting for SSH..."
+sleep 30
+
+# ---- TEST ----
+export ANSIBLE_HOST_KEY_CHECKING=False
+ansible all -i ansible/hosts.cfg -m ping
+
+echo "Deployment complete!"
