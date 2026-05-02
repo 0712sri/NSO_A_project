@@ -45,20 +45,40 @@
         path: /home/ubuntu/service.py
         line: "app.run(host='0.0.0.0', port=5000)"
 
+    - name: Install SNMPd
+      apt:
+        name: snmpd
+        state: present
+
     - name: Start SNMPd
       service:
         name: snmpd
         state: started
         enabled: yes
 
-    - name: Kill old service.py
-      shell: "kill $(pgrep -f service.py) 2>/dev/null; exit 0"
-      ignore_errors: yes
+    - name: Create systemd service for service.py
+      copy:
+        dest: /etc/systemd/system/flask.service
+        content: |
+          [Unit]
+          Description=Flask Service
+          After=network.target
 
-    - name: Start service.py
-      shell: "nohup python3 /home/ubuntu/service.py > /tmp/service.log 2>&1 &"
-      args:
-        executable: /bin/bash
+          [Service]
+          User=ubuntu
+          WorkingDirectory=/home/ubuntu
+          ExecStart=/usr/bin/python3 /home/ubuntu/service.py
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start flask service
+      systemd:
+        name: flask
+        enabled: yes
+        state: restarted
+        daemon_reload: yes
 
 - name: Configure proxy
   hosts: proxy
