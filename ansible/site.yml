@@ -23,6 +23,16 @@
         name: snmpd
         state: present
 
+    - name: Fix DNS
+      copy:
+        content: "nameserver 8.8.8.8\n"
+        dest: /etc/resolv.conf
+
+    - name: Fix hosts file
+      lineinfile:
+        path: /etc/hosts
+        line: "127.0.1.1 {{ inventory_hostname }}"
+
     - name: Copy service.py
       copy:
         src: ../service.py
@@ -30,16 +40,24 @@
         owner: ubuntu
         mode: '0755'
 
+    - name: Add app.run to service.py
+      lineinfile:
+        path: /home/ubuntu/service.py
+        line: "app.run(host='0.0.0.0', port=5000)"
+
     - name: Start SNMPd
       service:
         name: snmpd
         state: started
         enabled: yes
 
+    - name: Kill old service.py
+      shell: pkill -f service.py || true
+
     - name: Start service.py
-      shell: nohup python3 /home/ubuntu/service.py > /home/ubuntu/service.log 2>&1 &
+      shell: nohup python3 /home/ubuntu/service.py > /tmp/service.log 2>&1 &
       args:
-        creates: /home/ubuntu/service.log
+        executable: /bin/bash
 
 - name: Configure proxy
   hosts: proxy
@@ -48,6 +66,11 @@
     - name: Update apt cache
       apt:
         update_cache: yes
+
+    - name: Fix DNS
+      copy:
+        content: "nameserver 8.8.8.8\n"
+        dest: /etc/resolv.conf
 
     - name: Install HAProxy
       apt:
