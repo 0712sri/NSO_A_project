@@ -52,10 +52,11 @@
         enabled: yes
 
     - name: Kill old service.py
-      shell: pkill -f service.py || true
+      shell: "kill $(pgrep -f service.py) 2>/dev/null; exit 0"
+      ignore_errors: yes
 
     - name: Start service.py
-      shell: nohup python3 /home/ubuntu/service.py > /tmp/service.log 2>&1 &
+      shell: "nohup python3 /home/ubuntu/service.py > /tmp/service.log 2>&1 &"
       args:
         executable: /bin/bash
 
