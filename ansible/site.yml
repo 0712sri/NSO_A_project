@@ -108,3 +108,19 @@
         name: haproxy
         state: restarted
         enabled: yes
+
+- name: Configure bastion
+  hosts: bastion
+  become: yes
+  tasks:
+    - name: Fix DNS
+      copy:
+        content: "nameserver 8.8.8.8\n"
+        dest: /etc/resolv.conf
+
+    - name: Copy SSH key to bastion
+      copy:
+        src: /home/srinika/.ssh/openstack_key
+        dest: /home/ubuntu/.ssh/openstack_key
+        owner: ubuntu
+        mode: '0600'

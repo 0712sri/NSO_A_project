@@ -75,11 +75,12 @@ FLAVOR="small"
 # ---- CREATE SERVER ----
 create_server() {
     NAME=$1
+    FLAV=$2
     if ! openstack server show $NAME &>/dev/null; then
-        echo "Launching $NAME"
+        echo "Launching $NAME with flavor $FLAV"
         openstack server create \
             --image "$IMAGE" \
-            --flavor $FLAVOR \
+            --flavor $FLAV \
             --key-name ${TAG}_key \
             --network $NETWORK_ID \
             --security-group ${TAG}_sg \
@@ -90,11 +91,11 @@ create_server() {
 }
 
 # ---- CREATE SERVERS ----
-create_server ${TAG}_bastion
-create_server ${TAG}_proxy
+create_server ${TAG}_bastion small
+create_server ${TAG}_proxy small
 
 for i in $(seq 1 $NODE_COUNT); do
-    create_server ${TAG}_node${i}
+    create_server ${TAG}_node${i} tiny
 done
 
 # ---- WAIT ----
@@ -115,5 +116,4 @@ done
 # ---- FLOATING IP ATTACH ----
 openstack server add floating ip ${TAG}_bastion $BASTION_IP 2>/dev/null
 openstack server add floating ip ${TAG}_proxy $PROXY_IP 2>/dev/null
-
 echo "Deployment complete!"
