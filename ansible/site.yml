@@ -1,91 +1,66 @@
-- name: Setup all nodes
-  hosts: all
-  become: yes
-  tasks:
-    - name: Install base packages
-      apt:
-        name:
-          - curl
-          - vim
-          - git
-          - python3-pip
-        state: present
-        update_cache: yes
-
-- name: Setup web servers on nodes
+---
+- name: Configure nodes
   hosts: nodes
   become: yes
   tasks:
-    - name: Install Apache
+    - name: Update apt cache
       apt:
-        name: apache2
+        update_cache: yes
+
+    - name: Install python3 and pip
+      apt:
+        name:
+          - python3
+          - python3-pip
         state: present
 
-    - name: Start Apache
+    - name: Install flask
+      pip:
+        name: flask
+
+    - name: Install SNMPd
+      apt:
+        name: snmpd
+        state: present
+
+    - name: Copy service.py
+      copy:
+        src: ../service.py
+        dest: /home/ubuntu/service.py
+        owner: ubuntu
+        mode: '0755'
+
+    - name: Start SNMPd
       service:
-        name: apache2
+        name: snmpd
         state: started
         enabled: yes
 
-- name: Configure node1 page
-  hosts: node1
-  become: yes
-  tasks:
-    - name: Add node1 page
-      copy:
-        content: "Hello from NODE 1"
-        dest: /var/www/html/index.html
+    - name: Start service.py
+      shell: nohup python3 /home/ubuntu/service.py > /home/ubuntu/service.log 2>&1 &
+      args:
+        creates: /home/ubuntu/service.log
 
-- name: Configure node2 page
-  hosts: node2
+- name: Configure proxy
+  hosts: proxy
   become: yes
   tasks:
-    - name: Add node2 page
-      copy:
-        content: "Hello from NODE 2"
-        dest: /var/www/html/index.html
+    - name: Update apt cache
+      apt:
+        update_cache: yes
 
-- name: Setup HAProxy
-  hosts: proxy_host
-  become: yes
-  tasks:
     - name: Install HAProxy
       apt:
         name: haproxy
         state: present
 
     - name: Configure HAProxy
-      copy:
+      template:
+        src: haproxy.cfg.j2
         dest: /etc/haproxy/haproxy.cfg
-        content: |
-          global
-              daemon
-              maxconn 256
-
-          defaults
-              mode http
-              timeout connect 5s
-              timeout client  50s
-              timeout server  50s
-
-          frontend http_front
-              bind *:80
-              default_backend http_back
-
-          backend http_back
-              balance roundrobin
-              server node1 192.168.1.53:80 check
-              server node2 192.168.1.122:80 check
-
-          listen stats
-              bind *:8404
-              mode http
-              stats enable
-              stats uri /stats
-              stats refresh 5s
-              stats auth admin:admin
 
     - name: Restart HAProxy
       service:
         name: haproxy
         state: restarted
+        enabled: yes

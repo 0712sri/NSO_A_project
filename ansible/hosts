@@ -1,0 +1,9 @@
+[bastion]
+bastion ansible_host=194.47.155.145 ansible_user=ubuntu ansible_ssh_private_key_file=/home/srinika/.ssh/openstack_key ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+
+[proxy]
+proxy ansible_host=194.47.155.117 ansible_user=ubuntu ansible_ssh_private_key_file=/home/srinika/.ssh/openstack_key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyCommand="ssh -i /home/srinika/.ssh/openstack_key -W %h:%p -o StrictHostKeyChecking=no ubuntu@194.47.155.145"'
+
+[nodes]
+node1 ansible_host=192.168.1.136 ansible_user=ubuntu ansible_ssh_private_key_file=/home/srinika/.ssh/openstack_key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyCommand="ssh -i /home/srinika/.ssh/openstack_key -W %h:%p -o StrictHostKeyChecking=no ubuntu@194.47.155.145"'
+node2 ansible_host=192.168.1.239 ansible_user=ubuntu ansible_ssh_private_key_file=/home/srinika/.ssh/openstack_key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyCommand="ssh -i /home/srinika/.ssh/openstack_key -W %h:%p -o StrictHostKeyChecking=no ubuntu@194.47.155.145"'
