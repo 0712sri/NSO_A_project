@@ -145,8 +145,14 @@ done
 echo "$(date '+%Y-%m-%d %H:%M:%S') hosts file generated."
 
 # ---- WAIT FOR SSH ----
-echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting 60s for SSH to be ready..."
-sleep 60
+echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting 120s for SSH to be ready..."
+sleep 120
+
+# ---- FIX HOSTNAME ON NODES ----
+for i in $(seq 1 $NODE_COUNT); do
+    NODE_IP=$(openstack server show ${TAG}_node${i} -f value -c addresses | grep -oP '[\d.]+' | head -1)
+    ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o ProxyCommand="ssh -i $SSH_KEY -W %h:%p -o StrictHostKeyChecking=no ubuntu@$BASTION_IP" ubuntu@$NODE_IP "hostname | xargs -I{} sudo bash -c 'echo 127.0.1.1 {} >> /etc/hosts'" 2>/dev/null || true
+done
 
 # ---- RUN ANSIBLE ----
 export ANSIBLE_HOST_KEY_CHECKING=False
