@@ -10,87 +10,86 @@ TAG=$2
 SSH_KEY=$3
 
 source $OPENRC
-echo "Starting deployment: $TAG"
+echo "$(date '+%Y-%m-%d %H:%M:%S') Starting deployment of $TAG"
 
 # ---- NODE COUNT ----
 NODE_COUNT=$(grep -E '^[0-9]+$' servers.conf | head -1)
-echo "Node count: $NODE_COUNT"
+echo "$(date '+%Y-%m-%d %H:%M:%S') Node count: $NODE_COUNT"
 
 # ---- KEYPAIR ----
 if ! openstack keypair show ${TAG}_key &>/dev/null; then
-    echo "Creating keypair..."
-    openstack keypair create --public-key ${SSH_KEY}.pub ${TAG}_key
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Creating keypair..."
+    openstack keypair create --public-key ${SSH_KEY}.pub ${TAG}_key > /dev/null
 fi
 
 # ---- NETWORK ----
 if ! openstack network show ${TAG}_network &>/dev/null; then
-    echo "Creating network..."
-    openstack network create ${TAG}_network
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Creating network..."
+    openstack network create ${TAG}_network > /dev/null
     openstack subnet create \
         --network ${TAG}_network \
         --subnet-range 192.168.1.0/24 \
-        ${TAG}_subnet
+        --dns-nameserver 8.8.8.8 \
+        ${TAG}_subnet > /dev/null
 fi
 
 NETWORK_ID=$(openstack network show ${TAG}_network -f value -c id)
 
 # ---- ROUTER ----
 if ! openstack router show ${TAG}_router &>/dev/null; then
-    echo "Creating router..."
-    openstack router create ${TAG}_router
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Creating router..."
+    openstack router create ${TAG}_router > /dev/null
 fi
-
 openstack router set --external-gateway External ${TAG}_router 2>/dev/null || true
 openstack router add subnet ${TAG}_router ${TAG}_subnet 2>/dev/null || true
 
 # ---- SECURITY GROUP ----
 if ! openstack security group show ${TAG}_sg &>/dev/null; then
-    echo "Creating security group..."
-    openstack security group create ${TAG}_sg
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Creating security group..."
+    openstack security group create ${TAG}_sg > /dev/null
+    openstack security group rule create --proto tcp --dst-port 22 ${TAG}_sg > /dev/null
+    openstack security group rule create --proto tcp --dst-port 5000 ${TAG}_sg > /dev/null
+    openstack security group rule create --proto udp --dst-port 6000 ${TAG}_sg > /dev/null
+    openstack security group rule create --proto icmp ${TAG}_sg > /dev/null
 fi
 
-openstack security group rule create --proto tcp --dst-port 22 ${TAG}_sg 2>/dev/null || true
-openstack security group rule create --proto tcp --dst-port 5000 ${TAG}_sg 2>/dev/null || true
-openstack security group rule create --proto udp --dst-port 6000 ${TAG}_sg 2>/dev/null || true
-openstack security group rule create --proto icmp ${TAG}_sg 2>/dev/null || true
-
-# ---- FLOATING IP ----
+# ---- FLOATING IPs ----
 AVAILABLE_IPS=$(openstack floating ip list --status DOWN -f value -c "Floating IP Address")
 IP_COUNT=$(echo "$AVAILABLE_IPS" | grep -c '[0-9]' || true)
 
 if [ "$IP_COUNT" -ge 2 ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Reusing existing floating IPs..."
     BASTION_IP=$(echo "$AVAILABLE_IPS" | sed -n '1p')
     PROXY_IP=$(echo "$AVAILABLE_IPS" | sed -n '2p')
 else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Allocating floating IPs..."
     BASTION_IP=$(openstack floating ip create External -f value -c floating_ip_address)
     PROXY_IP=$(openstack floating ip create External -f value -c floating_ip_address)
 fi
+echo "$(date '+%Y-%m-%d %H:%M:%S') Bastion IP: $BASTION_IP, Proxy IP: $PROXY_IP"
 
 # ---- IMAGE ----
 IMAGE=$(openstack image list -f value -c Name | grep -i "Ubuntu 20.04" | head -1)
-[ -z "$IMAGE" ] && echo "ERROR: No Ubuntu image" && exit 1
+[ -z "$IMAGE" ] && echo "ERROR: No Ubuntu image found" && exit 1
 
-FLAVOR="small"
-
-# ---- CREATE SERVER ----
+# ---- CREATE SERVERS ----
 create_server() {
     NAME=$1
     FLAV=$2
     if ! openstack server show $NAME &>/dev/null; then
-        echo "Launching $NAME with flavor $FLAV"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Launching $NAME with flavor $FLAV"
         openstack server create \
             --image "$IMAGE" \
             --flavor $FLAV \
             --key-name ${TAG}_key \
             --network $NETWORK_ID \
             --security-group ${TAG}_sg \
-            $NAME
+            $NAME > /dev/null
     else
-        echo "$NAME exists"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') $NAME already exists"
     fi
 }
 
-# ---- CREATE SERVERS ----
 create_server ${TAG}_bastion small
 create_server ${TAG}_proxy small
 
@@ -98,22 +97,67 @@ for i in $(seq 1 $NODE_COUNT); do
     create_server ${TAG}_node${i} tiny
 done
 
-# ---- WAIT ----
-echo "Waiting for servers..."
-for i in {1..30}; do
-    TOTAL=$(openstack server list -f value -c Name | grep -c "${TAG}_")
-    ACTIVE=$(openstack server list -f value -c Name -c Status | grep "${TAG}_" | grep -c ACTIVE)
+# ---- WAIT FOR ACTIVE ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting for all servers to become ACTIVE..."
+for SERVER in ${TAG}_bastion ${TAG}_proxy $(seq 1 $NODE_COUNT | xargs -I{} echo ${TAG}_node{}); do
+    while true; do
+        STATUS=$(openstack server show $SERVER -f value -c status 2>/dev/null)
+        if [ "$STATUS" = "ACTIVE" ]; then
+            echo -n "[$SERVER done]"
+            break
+        fi
+        sleep 5
+    done
+done
+echo ""
+echo "$(date '+%Y-%m-%d %H:%M:%S') All servers ACTIVE."
 
-    if [ "$TOTAL" -gt 0 ] && [ "$ACTIVE" -eq "$TOTAL" ]; then
-        echo "All servers ACTIVE"
-        break
+# ---- ATTACH FLOATING IPs ----
+openstack server add floating ip ${TAG}_bastion $BASTION_IP 2>/dev/null || true
+openstack server add floating ip ${TAG}_proxy $PROXY_IP 2>/dev/null || true
+echo "$(date '+%Y-%m-%d %H:%M:%S') Floating IPs attached."
+
+# ---- GET NODE IPs ----
+BASTION_INTERNAL=$(openstack server show ${TAG}_bastion -f value -c addresses | grep -oP '[\d.]+' | head -1)
+PROXY_INTERNAL=$(openstack server show ${TAG}_proxy -f value -c addresses | grep -oP '[\d.]+' | head -1)
+
+# ---- GENERATE HOSTS FILE ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Generating Ansible hosts file..."
+mkdir -p ansible
+
+cat > ansible/hosts << HOSTS
+[bastion]
+bastion ansible_host=$BASTION_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+
+[proxy]
+proxy ansible_host=$PROXY_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyCommand="ssh -i $SSH_KEY -W %h:%p -o StrictHostKeyChecking=no ubuntu@$BASTION_IP"'
+
+[nodes]
+HOSTS
+
+for i in $(seq 1 $NODE_COUNT); do
+    NODE_IP=$(openstack server show ${TAG}_node${i} -f value -c addresses | grep -oP '[\d.]+' | head -1)
+    if [ -n "$NODE_IP" ]; then
+        echo "node${i} ansible_host=$NODE_IP ansible_user=ubuntu ansible_ssh_private_key_file=$SSH_KEY ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyCommand=\"ssh -i $SSH_KEY -W %h:%p -o StrictHostKeyChecking=no ubuntu@$BASTION_IP\"'" >> ansible/hosts
     fi
-
-    echo -n "."
-    sleep 10
 done
 
-# ---- FLOATING IP ATTACH ----
-openstack server add floating ip ${TAG}_bastion $BASTION_IP 2>/dev/null
-openstack server add floating ip ${TAG}_proxy $PROXY_IP 2>/dev/null
-echo "Deployment complete!"
+echo "$(date '+%Y-%m-%d %H:%M:%S') hosts file generated."
+
+# ---- WAIT FOR SSH ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting 60s for SSH to be ready..."
+sleep 60
+
+# ---- RUN ANSIBLE ----
+export ANSIBLE_HOST_KEY_CHECKING=False
+echo "$(date '+%Y-%m-%d %H:%M:%S') Running Ansible playbook..."
+ansible-playbook -i ansible/hosts ansible/site.yml
+
+# ---- VALIDATE ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Validating deployment..."
+for i in 1 2 3; do
+    RESPONSE=$(curl -s http://$PROXY_IP:5000)
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Request$i: $RESPONSE"
+done
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') Deployment complete! Bastion: $BASTION_IP Proxy: $PROXY_IP"
