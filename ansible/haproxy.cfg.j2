@@ -16,3 +16,13 @@ backend service_nodes
 {% for host in groups['nodes'] %}
     server {{ host }} {{ hostvars[host]['ansible_host'] }}:5000 check
 {% endfor %}
+
+frontend snmp_front
+    bind *:6000
+    default_backend snmp_nodes
+
+backend snmp_nodes
+    balance roundrobin
+{% for host in groups['nodes'] %}
+    server {{ host }} {{ hostvars[host]['ansible_host'] }}:161 check
+{% endfor %}

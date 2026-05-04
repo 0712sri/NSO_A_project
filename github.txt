@@ -1,0 +1,2 @@
+origin	https://github.com/0712sri/NSO_A_project (fetch)
+origin	https://github.com/0712sri/NSO_A_project (push)
