@@ -10,20 +10,23 @@ TAG=$2
 SSH_KEY=$3
 
 source $OPENRC
-
 echo "$(date '+%Y-%m-%d %H:%M:%S') Cleaning up $TAG using $OPENRC"
 
 # ---- DELETE ALL SERVERS ----
-SERVERS=$(openstack server list -f value -c Name)
-for SERVER in $SERVERS; do
-    echo "$(date '+%Y-%m-%d %H:%M:%S') Deleting server $SERVER..."
-    openstack server delete $SERVER
-done
+SERVERS=$(openstack server list -f value -c Name | grep "^${TAG}_")
+if [ -n "$SERVERS" ]; then
+    for SERVER in $SERVERS; do
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Deleting server $SERVER..."
+        openstack server delete $SERVER 2>/dev/null || true
+    done
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') No servers found."
+fi
 
 # Wait for servers to disappear
 echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting for servers to disappear..."
 while true; do
-    COUNT=$(openstack server list -f value -c Name | grep -c '[a-z]' || true)
+    COUNT=$(openstack server list -f value -c Name | grep -c "^${TAG}_" || true)
     if [ "$COUNT" -eq 0 ]; then
         break
     fi
@@ -33,11 +36,14 @@ done
 echo ""
 echo "$(date '+%Y-%m-%d %H:%M:%S') Servers are gone."
 
+# Wait a bit for floating IPs to detach
+sleep 10
+
 # ---- RELEASE FLOATING IPs ----
 echo "$(date '+%Y-%m-%d %H:%M:%S') Releasing floating IPs..."
-FLOATING_IPS=$(openstack floating ip list --status DOWN -f value -c ID)
-for IP in $FLOATING_IPS; do
-    openstack floating ip delete $IP
+ALL_IPS=$(openstack floating ip list -f value -c ID)
+for IP in $ALL_IPS; do
+    openstack floating ip delete $IP 2>/dev/null || true
 done
 
 # ---- REMOVE SECURITY GROUP ----
@@ -58,5 +64,30 @@ openstack network delete ${TAG}_network 2>/dev/null || true
 # ---- REMOVE KEYPAIR ----
 echo "$(date '+%Y-%m-%d %H:%M:%S') Removing keypair..."
 openstack keypair delete ${TAG}_key 2>/dev/null || true
+
+# ---- VERIFY ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Verifying cleanup..."
+REMAINING_SERVERS=$(openstack server list -f value -c Name | grep "^${TAG}_" || true)
+REMAINING_IPS=$(openstack floating ip list -f value -c ID || true)
+REMAINING_NETWORK=$(openstack network show ${TAG}_network 2>/dev/null || true)
+REMAINING_ROUTER=$(openstack router show ${TAG}_router 2>/dev/null || true)
+REMAINING_KEY=$(openstack keypair show ${TAG}_key 2>/dev/null || true)
+
+if [ -z "$REMAINING_SERVERS" ] && [ -z "$REMAINING_IPS" ] && [ -z "$REMAINING_NETWORK" ] && [ -z "$REMAINING_ROUTER" ] && [ -z "$REMAINING_KEY" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Cleanup verified - all resources removed!"
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') WARNING: Some resources may still exist, running second pass..."
+    openstack server list -f value -c Name | grep "^${TAG}_" | xargs -I{} openstack server delete {} 2>/dev/null || true
+    sleep 10
+    openstack floating ip list -f value -c ID | xargs -I{} openstack floating ip delete {} 2>/dev/null || true
+    openstack security group delete ${TAG}_sg 2>/dev/null || true
+    openstack router remove subnet ${TAG}_router ${TAG}_subnet 2>/dev/null || true
+    openstack router unset --external-gateway ${TAG}_router 2>/dev/null || true
+    openstack router delete ${TAG}_router 2>/dev/null || true
+    openstack subnet delete ${TAG}_subnet 2>/dev/null || true
+    openstack network delete ${TAG}_network 2>/dev/null || true
+    openstack keypair delete ${TAG}_key 2>/dev/null || true
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Second pass complete."
+fi
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') Cleanup done!"
