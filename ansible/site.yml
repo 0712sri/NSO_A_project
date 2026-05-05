@@ -33,6 +33,18 @@
         path: /etc/hosts
         line: "127.0.1.1 {{ inventory_hostname }}"
 
+    - name: Configure SNMPd
+      shell: |
+        setcap 'cap_net_bind_service=+ep' /usr/sbin/snmpd
+        sed -i '/agentAddress/d' /etc/snmp/snmpd.conf
+        echo 'agentAddress udp:161,udp6:[::1]:161' >> /etc/snmp/snmpd.conf
+
+    - name: Start SNMPd
+      service:
+        name: snmpd
+        state: restarted
+        enabled: yes
+
     - name: Copy service.py
       copy:
         src: ../service.py
@@ -44,17 +56,6 @@
       lineinfile:
         path: /home/ubuntu/service.py
         line: "app.run(host='0.0.0.0', port=5000)"
-
-    - name: Install SNMPd
-      apt:
-        name: snmpd
-        state: present
-
-    - name: Start SNMPd
-      service:
-        name: snmpd
-        state: started
-        enabled: yes
 
     - name: Create systemd service for service.py
       copy:
