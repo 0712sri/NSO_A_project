@@ -157,7 +157,14 @@ done
 # ---- RUN ANSIBLE ----
 export ANSIBLE_HOST_KEY_CHECKING=False
 echo "$(date '+%Y-%m-%d %H:%M:%S') Running Ansible playbook..."
-ansible-playbook -i ansible/hosts ansible/site.yml
+
+# Try Ansible up to 3 times
+for attempt in 1 2 3; do
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Ansible attempt $attempt..."
+    ansible-playbook -i ansible/hosts ansible/site.yml && break
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Attempt $attempt failed, waiting 30s..."
+    sleep 30
+done
 
 # ---- VALIDATE ----
 echo "$(date '+%Y-%m-%d %H:%M:%S') Validating deployment..."
