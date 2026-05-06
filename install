@@ -35,9 +35,6 @@ fi
 
 NETWORK_ID=$(openstack network show ${TAG}_network -f value -c id)
 
-openstack network set --tag $TAG ${TAG}_network
-openstack router set --tag $TAG ${TAG}_router  # if supported
-openstack security group set --tag $TAG ${TAG}_sg  # if supported
 openstack network set --tag $TAG ${TAG}_network 2>/dev/null || true
 
 # ---- ROUTER ----
