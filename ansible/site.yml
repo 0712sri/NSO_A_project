@@ -29,9 +29,7 @@
         dest: /etc/resolv.conf
 
     - name: Fix hosts file
-      lineinfile:
-        path: /etc/hosts
-        line: "127.0.1.1 {{ inventory_hostname }}"
+      shell: "hostname | xargs -I{} bash -c 'grep -q {} /etc/hosts || echo 127.0.1.1 {} >> /etc/hosts'"
 
     - name: Configure SNMPd
       shell: |
