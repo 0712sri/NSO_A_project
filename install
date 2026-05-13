@@ -134,7 +134,21 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting for SSH to be ready..."
 for i in $(seq 1 18); do
     sleep 10
     if ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=5 ubuntu@$BASTION_IP "echo ok" &>/dev/null; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') SSH ready after $((i*10))s"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Bastion SSH ready after $((i*10))s"
+        break
+    fi
+    echo -n "."
+done
+
+# Wait for nodes to be reachable through bastion
+echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting for nodes to be reachable..."
+for i in $(seq 1 18); do
+    sleep 10
+    NODE1_IP=$(openstack server show ${TAG}_node1 -f value -c addresses | grep -oP '[\d.]+' | head -1)
+    if ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+        -o ProxyCommand="ssh -i $SSH_KEY -W %h:%p -o StrictHostKeyChecking=no ubuntu@$BASTION_IP" \
+        ubuntu@$NODE1_IP "echo ok" &>/dev/null; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Nodes ready after $((i*10))s"
         break
     fi
     echo -n "."
