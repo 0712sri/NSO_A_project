@@ -16,6 +16,15 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') Starting deployment of $TAG"
 NODE_COUNT=$(grep -E '^[0-9]+$' servers.conf | head -1)
 echo "$(date '+%Y-%m-%d %H:%M:%S') Node count: $NODE_COUNT"
 
+# ---- AUTO DETECT EXTERNAL NETWORK ----
+EXT_NET=$(openstack network list --external -f value -c ID | head -n 1)
+echo "$(date '+%Y-%m-%d %H:%M:%S') External network: $EXT_NET"
+
+# ---- AUTO DETECT FLAVORS ----
+FLAVOR_SMALL=$(openstack flavor list -f value -c Name | grep -i small | head -1)
+FLAVOR_TINY=$(openstack flavor list -f value -c Name | grep -i tiny | head -1)
+echo "$(date '+%Y-%m-%d %H:%M:%S') Flavors: small=$FLAVOR_SMALL tiny=$FLAVOR_TINY"
+
 # ---- KEYPAIR ----
 if ! openstack keypair show ${TAG}_key &>/dev/null; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') Creating keypair..."
@@ -31,18 +40,17 @@ if ! openstack network show ${TAG}_network &>/dev/null; then
         --subnet-range 192.168.1.0/24 \
         --dns-nameserver 8.8.8.8 \
         ${TAG}_subnet > /dev/null
+    openstack network set --tag $TAG ${TAG}_network 2>/dev/null || true
 fi
 
 NETWORK_ID=$(openstack network show ${TAG}_network -f value -c id)
-
-openstack network set --tag $TAG ${TAG}_network 2>/dev/null || true
 
 # ---- ROUTER ----
 if ! openstack router show ${TAG}_router &>/dev/null; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') Creating router..."
     openstack router create ${TAG}_router > /dev/null
 fi
-openstack router set --external-gateway External ${TAG}_router 2>/dev/null || true
+openstack router set --external-gateway $EXT_NET ${TAG}_router 2>/dev/null || true
 openstack router add subnet ${TAG}_router ${TAG}_subnet 2>/dev/null || true
 openstack router set --tag $TAG ${TAG}_router 2>/dev/null || true
 
@@ -54,8 +62,8 @@ if ! openstack security group show ${TAG}_sg &>/dev/null; then
     openstack security group rule create --proto tcp --dst-port 5000 ${TAG}_sg > /dev/null
     openstack security group rule create --proto udp --dst-port 6000 ${TAG}_sg > /dev/null
     openstack security group rule create --proto icmp ${TAG}_sg > /dev/null
+    openstack security group set --tag $TAG ${TAG}_sg 2>/dev/null || true
 fi
-openstack security group set --tag $TAG ${TAG}_sg 2>/dev/null || true
 
 # ---- FLOATING IPs ----
 AVAILABLE_IPS=$(openstack floating ip list --status DOWN -f value -c "Floating IP Address")
@@ -67,8 +75,8 @@ if [ "$IP_COUNT" -ge 2 ]; then
     PROXY_IP=$(echo "$AVAILABLE_IPS" | sed -n '2p')
 else
     echo "$(date '+%Y-%m-%d %H:%M:%S') Allocating floating IPs..."
-    BASTION_IP=$(openstack floating ip create External -f value -c floating_ip_address)
-    PROXY_IP=$(openstack floating ip create External -f value -c floating_ip_address)
+    BASTION_IP=$(openstack floating ip create $EXT_NET -f value -c floating_ip_address)
+    PROXY_IP=$(openstack floating ip create $EXT_NET -f value -c floating_ip_address)
 fi
 echo "$(date '+%Y-%m-%d %H:%M:%S') Bastion IP: $BASTION_IP, Proxy IP: $PROXY_IP"
 
@@ -94,11 +102,11 @@ create_server() {
     fi
 }
 
-create_server ${TAG}_bastion small
-create_server ${TAG}_proxy small
+create_server ${TAG}_bastion $FLAVOR_SMALL
+create_server ${TAG}_proxy $FLAVOR_SMALL
 
 for i in $(seq 1 $NODE_COUNT); do
-    create_server ${TAG}_node${i} tiny
+    create_server ${TAG}_node${i} $FLAVOR_TINY
 done
 
 # ---- WAIT FOR ACTIVE ----
@@ -121,11 +129,57 @@ openstack server add floating ip ${TAG}_bastion $BASTION_IP 2>/dev/null || true
 openstack server add floating ip ${TAG}_proxy $PROXY_IP 2>/dev/null || true
 echo "$(date '+%Y-%m-%d %H:%M:%S') Floating IPs attached."
 
+# ---- WAIT FOR SSH ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting for SSH to be ready..."
+for i in $(seq 1 18); do
+    sleep 10
+    if ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o ConnectTimeout=5 ubuntu@$BASTION_IP "echo ok" &>/dev/null; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') SSH ready after $((i*10))s"
+        break
+    fi
+    echo -n "."
+done
+
 # ---- GET NODE IPs ----
 BASTION_INTERNAL=$(openstack server show ${TAG}_bastion -f value -c addresses | grep -oP '[\d.]+' | head -1)
 PROXY_INTERNAL=$(openstack server show ${TAG}_proxy -f value -c addresses | grep -oP '[\d.]+' | head -1)
 
-# ---- GENERATE HOSTS FILE ----
+# ---- GENERATE SSH CONFIG ----
+echo "$(date '+%Y-%m-%d %H:%M:%S') Generating SSH config..."
+SSH_CONFIG="${TAG}_SSHconfig"
+
+cat > $SSH_CONFIG << SSHEOF
+Host ${TAG}_bastion
+    HostName $BASTION_IP
+    User ubuntu
+    IdentityFile $SSH_KEY
+    StrictHostKeyChecking no
+
+Host ${TAG}_proxy
+    HostName $PROXY_INTERNAL
+    User ubuntu
+    IdentityFile $SSH_KEY
+    StrictHostKeyChecking no
+    ProxyJump ${TAG}_bastion
+
+SSHEOF
+
+for i in $(seq 1 $NODE_COUNT); do
+    NODE_IP=$(openstack server show ${TAG}_node${i} -f value -c addresses | grep -oP '[\d.]+' | head -1)
+    cat >> $SSH_CONFIG << SSHEOF
+Host ${TAG}_node${i}
+    HostName $NODE_IP
+    User ubuntu
+    IdentityFile $SSH_KEY
+    StrictHostKeyChecking no
+    ProxyJump ${TAG}_bastion
+
+SSHEOF
+done
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') SSH config saved to $SSH_CONFIG"
+
+# ---- GENERATE ANSIBLE HOSTS ----
 echo "$(date '+%Y-%m-%d %H:%M:%S') Generating Ansible hosts file..."
 mkdir -p ansible
 
@@ -148,21 +202,10 @@ done
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') hosts file generated."
 
-# ---- WAIT FOR SSH ----
-echo "$(date '+%Y-%m-%d %H:%M:%S') Waiting 180s for SSH to be ready..."
-sleep 180
-
-# ---- FIX HOSTNAME ON NODES ----
-for i in $(seq 1 $NODE_COUNT); do
-    NODE_IP=$(openstack server show ${TAG}_node${i} -f value -c addresses | grep -oP '[\d.]+' | head -1)
-    ssh -i $SSH_KEY -o StrictHostKeyChecking=no -o ProxyCommand="ssh -i $SSH_KEY -W %h:%p -o StrictHostKeyChecking=no ubuntu@$BASTION_IP" ubuntu@$NODE_IP "hostname | xargs -I{} sudo bash -c 'echo 127.0.1.1 {} >> /etc/hosts'" 2>/dev/null || true
-done
-
 # ---- RUN ANSIBLE ----
 export ANSIBLE_HOST_KEY_CHECKING=False
 echo "$(date '+%Y-%m-%d %H:%M:%S') Running Ansible playbook..."
 
-# Try Ansible up to 3 times
 for attempt in 1 2 3; do
     echo "$(date '+%Y-%m-%d %H:%M:%S') Ansible attempt $attempt..."
     ansible-playbook -i ansible/hosts ansible/site.yml && break

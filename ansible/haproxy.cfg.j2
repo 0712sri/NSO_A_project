@@ -24,5 +24,5 @@ frontend snmp_front
 backend snmp_nodes
     balance roundrobin
 {% for host in groups['nodes'] %}
-    server {{ host }} {{ hostvars[host]['ansible_host'] }}:161 check
+    server {{ host }} {{ hostvars[host]['ansible_host'] }}:161
 {% endfor %}
