@@ -1,0 +1,12 @@
+[Unit]
+Description=Flask Backend Application
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+ExecStart=/usr/bin/python3 /home/ubuntu/service.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

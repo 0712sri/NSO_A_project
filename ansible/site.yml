@@ -1,125 +1,118 @@
 ---
-- name: Configure nodes
+- name: Configure worker nodes
   hosts: nodes
   become: yes
+  gather_facts: no
   tasks:
-    - name: Update apt cache
+    - name: Wait for cloud-init to complete
+      raw: cloud-init status --wait
+      changed_when: false
+
+    - name: Wait for apt locks to release
+      shell: while fuser /var/lib/dpkg/lock-frontend; do sleep 5; done;
+      changed_when: false
+
+    - name: Gather facts
+      setup:
+
+    - name: Update apt
       apt:
         update_cache: yes
 
-    - name: Install python3 and pip
+    - name: Install node packages
       apt:
         name:
-          - python3
           - python3-pip
+          - snmpd
         state: present
-
-    - name: Install flask
-      pip:
-        name: flask
-
-    - name: Install SNMPd
-      apt:
-        name: snmpd
-        state: present
-
-    - name: Fix DNS
-      copy:
-        content: "nameserver 8.8.8.8\n"
-        dest: /etc/resolv.conf
-
-    - name: Fix hosts file
-      shell: "hostname | xargs -I{} bash -c 'grep -q {} /etc/hosts || echo 127.0.1.1 {} >> /etc/hosts'"
-
-    - name: Configure SNMPd
-      shell: |
-        setcap 'cap_net_bind_service=+ep' /usr/sbin/snmpd
-        sed -i '/agentAddress/d' /etc/snmp/snmpd.conf
-        echo 'agentAddress udp:161,udp6:[::1]:161' >> /etc/snmp/snmpd.conf
-
-    - name: Start SNMPd
-      service:
-        name: snmpd
-        state: restarted
-        enabled: yes
 
     - name: Copy service.py
       copy:
         src: ../service.py
         dest: /home/ubuntu/service.py
-        owner: ubuntu
         mode: '0755'
 
-    - name: Add app.run to service.py
-      lineinfile:
-        path: /home/ubuntu/service.py
-        line: "app.run(host='0.0.0.0', port=5000)"
-
-    - name: Create systemd service for service.py
-      copy:
-        dest: /etc/systemd/system/flask.service
-        content: |
-          [Unit]
-          Description=Flask Service
-          After=network.target
-
-          [Service]
-          User=ubuntu
-          WorkingDirectory=/home/ubuntu
-          ExecStart=/usr/bin/python3 /home/ubuntu/service.py
-          Restart=always
-
-          [Install]
-          WantedBy=multi-user.target
-
-    - name: Enable and start flask service
-      systemd:
+    - name: Install flask
+      pip:
         name: flask
+        executable: pip3
+
+    - name: Copy systemd service
+      copy:
+        src: ../my_flask_app.service
+        dest: /etc/systemd/system/my_flask_app.service
+
+    - name: Start flask service
+      systemd:
+        name: my_flask_app
+        state: started
         enabled: yes
-        state: restarted
         daemon_reload: yes
+
+    - name: Copy snmpd config
+      copy:
+        src: ../snmpd.conf
+        dest: /etc/snmp/snmpd.conf
+      notify: restart snmpd
+
+  handlers:
+    - name: restart snmpd
+      service:
+        name: snmpd
+        state: restarted
 
 - name: Configure proxy
   hosts: proxy
   become: yes
+  gather_facts: no
   tasks:
-    - name: Update apt cache
-      apt:
-        update_cache: yes
+    - name: Wait for cloud-init to complete
+      raw: cloud-init status --wait
+      changed_when: false
 
-    - name: Fix DNS
-      copy:
-        content: "nameserver 8.8.8.8\n"
-        dest: /etc/resolv.conf
+    - name: Wait for apt locks to release
+      shell: while fuser /var/lib/dpkg/lock-frontend; do sleep 5; done;
+      changed_when: false
+
+    - name: Gather facts
+      setup:
 
     - name: Install HAProxy
       apt:
         name: haproxy
         state: present
+        update_cache: yes
 
     - name: Configure HAProxy
       template:
         src: haproxy.cfg.j2
         dest: /etc/haproxy/haproxy.cfg
+      notify: restart haproxy
 
-    - name: Restart HAProxy
+    - name: Enable HAProxy
+      systemd:
+        name: haproxy
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: restart haproxy
       service:
         name: haproxy
         state: restarted
-        enabled: yes
 
 - name: Configure bastion
   hosts: bastion
   become: yes
+  gather_facts: no
   tasks:
-    - name: Fix DNS
-      copy:
-        content: "nameserver 8.8.8.8\n"
-        dest: /etc/resolv.conf
+    - name: Wait for cloud-init
+      raw: cloud-init status --wait
+      changed_when: false
 
     - name: Copy SSH key to bastion
       copy:
-        src: /home/srinika/.ssh/openstack_key
+        src: "{{ ansible_ssh_private_key_file }}"
         dest: /home/ubuntu/.ssh/openstack_key
         owner: ubuntu
         mode: '0600'
