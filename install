@@ -15,7 +15,7 @@ EXT_NET=$(openstack network list --external -f value -c ID | head -n 1)
 NUM_NODES=$(grep -i "^service_nodes" servers.conf | awk -F "=" '{print $2}' | tr -d '\r ' || echo "3")
 if [ -z "$NUM_NODES" ]; then NUM_NODES=3; fi
 
-IMAGE_ID=$(openstack image list -f value | grep -i "Ubuntu 20.04" | awk '{print $1}' | head -n 1)
+IMAGE_ID=$(openstack image list -f value | grep -i "Ubuntu" | awk '{print $1}' | head -n 1)
 FLAVOR_SMALL=$(openstack flavor list -f value -c Name | grep -i "small" | head -1)
 FLAVOR_TINY=$(openstack flavor list -f value -c Name | grep -i "tiny" | head -1)
 

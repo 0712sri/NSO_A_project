@@ -9,7 +9,7 @@
       changed_when: false
 
     - name: Wait for apt locks to release
-      shell: while fuser /var/lib/dpkg/lock-frontend; do sleep 5; done;
+      raw: while fuser /var/lib/dpkg/lock-frontend 2>/dev/null; do sleep 5; done
       changed_when: false
 
     - name: Gather facts
@@ -33,9 +33,9 @@
         mode: '0755'
 
     - name: Install flask
-      pip:
-        name: flask
-        executable: pip3
+      apt:
+        name: python3-flask
+        state: present
 
     - name: Copy systemd service
       copy:
@@ -71,7 +71,7 @@
       changed_when: false
 
     - name: Wait for apt locks to release
-      shell: while fuser /var/lib/dpkg/lock-frontend; do sleep 5; done;
+      raw: while fuser /var/lib/dpkg/lock-frontend 2>/dev/null; do sleep 5; done
       changed_when: false
 
     - name: Gather facts
