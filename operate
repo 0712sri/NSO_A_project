@@ -27,7 +27,7 @@ while true; do
         NEXT=$(openstack server list -f value -c Name | grep "${TAG}_node" | grep -oP '\d+' | sort -n | tail -1)
         NEXT=$((NEXT + 1))
 
-        IMAGE=$(openstack image list --status active -f value -c Name | grep -i "Ubuntu 20.04" | head -1)
+        IMAGE=$(openstack image list --status active -f value -c Name | grep -i "Ubuntu" | head -1)
         NETWORK_ID=$(openstack network show ${TAG}_network -f value -c id)
 
         for i in $(seq $NEXT $((NEXT + NEEDED - 1))); do
