@@ -70,18 +70,18 @@ if [ -z "$FIP2" ]; then FIP2=$(openstack floating ip create "$EXT_NET" -f value 
 echo "$(date '+%Y-%m-%d %H:%M:%S') Bastion IP: $FIP1, Proxy IP: $FIP2"
 
 # ---- SERVERS ----
-if ! openstack server show ${TAG}_bastion &>/dev/null; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') Launching ${TAG}_bastion..."
-    openstack server create --flavor $FLAVOR_SMALL --image "$IMAGE_ID" \
-        --network "$NET_ID" --security-group "${TAG}_sg" \
-        --key-name "${TAG}_key" "${TAG}_bastion" > /dev/null
-fi
-
 if ! openstack server show ${TAG}_proxy &>/dev/null; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') Launching ${TAG}_proxy..."
     openstack server create --flavor $FLAVOR_SMALL --image "$IMAGE_ID" \
         --network "$NET_ID" --security-group "${TAG}_sg" \
         --key-name "${TAG}_key" "${TAG}_proxy" > /dev/null
+fi
+
+if ! openstack server show ${TAG}_bastion &>/dev/null; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Launching ${TAG}_bastion..."
+    openstack server create --flavor $FLAVOR_SMALL --image "$IMAGE_ID" \
+        --network "$NET_ID" --security-group "${TAG}_sg" \
+        --key-name "${TAG}_key" "${TAG}_bastion" > /dev/null
 fi
 
 for ((i = 1; i <= NUM_NODES; i++)); do

@@ -1,10 +1,15 @@
 [bastion]
-bastion ansible_host=194.47.155.144 ansible_user=ubuntu ansible_ssh_private_key_file=/home/srinika/.ssh/openstack_key ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+bastion ansible_host=194.47.155.187
 
 [proxy]
-proxy ansible_host=194.47.155.128 ansible_user=ubuntu ansible_ssh_private_key_file=/home/srinika/.ssh/openstack_key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyCommand="ssh -i /home/srinika/.ssh/openstack_key -W %h:%p -o StrictHostKeyChecking=no ubuntu@194.47.155.144"'
+proxy ansible_host=192.168.1.178
 
 [nodes]
-node1 ansible_host=192.168.1.100 ansible_user=ubuntu ansible_ssh_private_key_file=/home/srinika/.ssh/openstack_key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyCommand="ssh -i /home/srinika/.ssh/openstack_key -W %h:%p -o StrictHostKeyChecking=no ubuntu@194.47.155.144"'
-node2 ansible_host=192.168.1.170 ansible_user=ubuntu ansible_ssh_private_key_file=/home/srinika/.ssh/openstack_key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyCommand="ssh -i /home/srinika/.ssh/openstack_key -W %h:%p -o StrictHostKeyChecking=no ubuntu@194.47.155.144"'
-node3 ansible_host=192.168.1.236 ansible_user=ubuntu ansible_ssh_private_key_file=/home/srinika/.ssh/openstack_key ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ProxyCommand="ssh -i /home/srinika/.ssh/openstack_key -W %h:%p -o StrictHostKeyChecking=no ubuntu@194.47.155.144"'
+node1 ansible_host=192.168.1.207
+node2 ansible_host=192.168.1.130
+node3 ansible_host=192.168.1.19
+
+[all:vars]
+ansible_user=ubuntu
+ansible_ssh_private_key_file=/home/srinika/.ssh/openstack_key
+ansible_ssh_common_args='-o ControlMaster=no -o ControlPath=none -o ConnectTimeout=60 -o StrictHostKeyChecking=no -o UserKnownHostsFile=./.temp_known_hosts -o ProxyCommand="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=./.temp_known_hosts -W %h:%p -q -i /home/srinika/.ssh/openstack_key ubuntu@194.47.155.187"'

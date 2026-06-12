@@ -1,0 +1,39 @@
+Host srinka_bastion
+    HostName 194.47.155.187
+    User ubuntu
+    IdentityFile /home/srinika/.ssh/openstack_key
+    StrictHostKeyChecking no
+    UserKnownHostsFile ./.temp_known_hosts
+
+Host srinka_proxy
+    HostName 192.168.1.178
+    User ubuntu
+    IdentityFile /home/srinika/.ssh/openstack_key
+    StrictHostKeyChecking no
+    UserKnownHostsFile ./.temp_known_hosts
+    ProxyJump srinka_bastion
+
+Host srinka_node1
+    HostName 192.168.1.207
+    User ubuntu
+    IdentityFile /home/srinika/.ssh/openstack_key
+    StrictHostKeyChecking no
+    UserKnownHostsFile ./.temp_known_hosts
+    ProxyJump srinka_bastion
+
+Host srinka_node2
+    HostName 192.168.1.130
+    User ubuntu
+    IdentityFile /home/srinika/.ssh/openstack_key
+    StrictHostKeyChecking no
+    UserKnownHostsFile ./.temp_known_hosts
+    ProxyJump srinka_bastion
+
+Host srinka_node3
+    HostName 192.168.1.19
+    User ubuntu
+    IdentityFile /home/srinika/.ssh/openstack_key
+    StrictHostKeyChecking no
+    UserKnownHostsFile ./.temp_known_hosts
+    ProxyJump srinka_bastion
+
