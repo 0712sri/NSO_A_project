@@ -1,12 +1,12 @@
 Host srinka_bastion
-    HostName 194.47.155.187
+    HostName 194.47.155.188
     User ubuntu
     IdentityFile /home/srinika/.ssh/openstack_key
     StrictHostKeyChecking no
     UserKnownHostsFile ./.temp_known_hosts
 
 Host srinka_proxy
-    HostName 192.168.1.178
+    HostName 192.168.1.120
     User ubuntu
     IdentityFile /home/srinika/.ssh/openstack_key
     StrictHostKeyChecking no
@@ -14,7 +14,7 @@ Host srinka_proxy
     ProxyJump srinka_bastion
 
 Host srinka_node1
-    HostName 192.168.1.207
+    HostName 192.168.1.32
     User ubuntu
     IdentityFile /home/srinika/.ssh/openstack_key
     StrictHostKeyChecking no
@@ -22,7 +22,7 @@ Host srinka_node1
     ProxyJump srinka_bastion
 
 Host srinka_node2
-    HostName 192.168.1.130
+    HostName 192.168.1.251
     User ubuntu
     IdentityFile /home/srinika/.ssh/openstack_key
     StrictHostKeyChecking no
@@ -30,7 +30,7 @@ Host srinka_node2
     ProxyJump srinka_bastion
 
 Host srinka_node3
-    HostName 192.168.1.19
+    HostName 192.168.1.194
     User ubuntu
     IdentityFile /home/srinika/.ssh/openstack_key
     StrictHostKeyChecking no
