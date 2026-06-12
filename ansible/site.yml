@@ -69,38 +69,42 @@
     - name: Wait for cloud-init to complete
       raw: cloud-init status --wait
       changed_when: false
-
     - name: Wait for apt locks to release
       raw: while fuser /var/lib/dpkg/lock-frontend 2>/dev/null; do sleep 5; done
       changed_when: false
-
     - name: Gather facts
       setup:
-
-    - name: Install HAProxy
-      apt:
-        name: haproxy
-        state: present
-        update_cache: yes
-
-    - name: Configure HAProxy
-      template:
-        src: haproxy.cfg.j2
-        dest: /etc/haproxy/haproxy.cfg
-      notify: restart haproxy
-
-    - name: Enable HAProxy
+    - name: Stop and disable HAProxy if running
       systemd:
         name: haproxy
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+    - name: Install libnginx-mod-stream
+      apt:
+        name: libnginx-mod-stream
+        state: present
+    - name: Configure Nginx
+      template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/nginx.conf
+      notify: restart nginx
+    - name: Enable Nginx
+      systemd:
+        name: nginx
         state: started
         enabled: yes
-
   handlers:
-    - name: restart haproxy
+    - name: restart nginx
       service:
-        name: haproxy
+        name: nginx
         state: restarted
-
 - name: Configure bastion
   hosts: bastion
   become: yes

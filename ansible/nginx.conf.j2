@@ -1,0 +1,34 @@
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+    worker_connections 768;
+}
+
+http {
+    upstream flask_backend {
+{% for host in groups['nodes'] %}
+        server {{ hostvars[host]['ansible_host'] }}:5000;
+{% endfor %}
+    }
+    server {
+        listen 5000;
+        location / {
+            proxy_pass http://flask_backend;
+        }
+    }
+}
+
+stream {
+    upstream snmp_backend {
+{% for host in groups['nodes'] %}
+        server {{ hostvars[host]['ansible_host'] }}:161;
+{% endfor %}
+    }
+    server {
+        listen 6000 udp;
+        proxy_pass snmp_backend;
+    }
+}
